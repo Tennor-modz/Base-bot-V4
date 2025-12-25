@@ -12,23 +12,24 @@ const {
   DisconnectReason
 } = require('@whiskeysockets/baileys');
 
-const { loadPlugins, watchPlugins } = require('./pluginStore');
-const { initDatabase,getSetting } = require('./database');
-const { logMessage } = require('./database/logger'); 
+const { loadPlugins, watchPlugins, plugins } = require('./pluginStore');
+const { initDatabase, getSetting } = require('./database');
+const { logMessage } = require('./database/logger');
 
 global.botStartTime = Date.now();
 
+// ===== ASK INPUT =====
 function question(query) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise(resolve => rl.question(query, ans => { rl.close(); resolve(ans.trim()); }));
 }
 
-// ===== Normalize number =====
+// ===== NUMBER FORMATTER =====
 function normalizeNumber(jid) {
   return jid ? jid.split("@")[0].split(":")[0] : "";
 }
 
-// ===== Cache cleaners =====
+// ===== CACHE CLEANERS =====
 function cleanOldCache() {
   const cacheFolder = path.join(__dirname, 'cache');
   if (!fs.existsSync(cacheFolder)) return 0;
@@ -41,18 +42,19 @@ function cleanOldCache() {
 }
 
 function cleanupOldMessages(hours = 24) {
-  return Math.floor(Math.random() * 20); 
+  return Math.floor(Math.random() * 20);
 }
 
-// ===== Autoreload command.js =====
+// ===== RELOAD MESSAGE HANDLER =====
 function getHandleMessage() {
   delete require.cache[require.resolve('./command')];
   return require('./command');
 }
 
-// ===== Bot starter =====
+// ===== BOT START FUNCTION =====
 async function startBot(phoneNumber = null) {
 
+  // Load plugins first so they register
   loadPlugins();
   watchPlugins();
 
@@ -60,7 +62,7 @@ async function startBot(phoneNumber = null) {
   const sessionFile = path.join(sessionDir, 'creds.json');
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-  const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [4,0,2] }));
+  const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [4, 0, 2] }));
 
   const trashcore = makeWASocket({
     version,
@@ -71,97 +73,108 @@ async function startBot(phoneNumber = null) {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
     },
-    browser: ['Ubuntu','Opera','100.0.0']
+    browser: ['Ubuntu', 'Opera', '100.0.0']
   });
 
-  trashcore.isPublic = true;
   trashcore.ev.on('creds.update', saveCreds);
 
-  // ===== PAIRING =====
+  // ===== PAIRING SYSTEM =====
   if (!fs.existsSync(sessionFile) && !phoneNumber) {
-    console.log(chalk.yellowBright("⚠️ No session found. You need to pair a WhatsApp number."));
-    phoneNumber = await question(chalk.yellowBright("[ = ] Enter the WhatsApp number you want to use as a bot (with country code):\n"));
+    console.log(chalk.yellowBright("⚠️ No session found. Pair a WhatsApp number."));
+    phoneNumber = await question(chalk.yellowBright("Enter WhatsApp number with country code:\n"));
     phoneNumber = normalizeNumber(phoneNumber);
-    console.log(chalk.greenBright(`⏳ Using number: ${phoneNumber} to start pairing...`));
 
     try {
       const pairCode = await trashcore.requestPairingCode(phoneNumber, "TRASHBOT");
-      console.log(chalk.cyanBright("📲 Enter this code on your phone: ") + chalk.green(pairCode));
-      console.log(chalk.yellowBright("⏳ Wait a few seconds and approve the pairing on your phone..."));
+      console.log(chalk.cyanBright("\n📲 Enter this code on your phone: ") + chalk.green(pairCode));
     } catch (err) {
-      console.error(chalk.redBright("❌ Failed to request pairing code:"), err);
+      console.error(chalk.redBright("❌ Pairing failed:"), err);
     }
   }
 
-trashcore.ev.on('messages.upsert', async chatUpdate => {
+  // ===== STATUS AUTO VIEW =====
+  trashcore.ev.on('messages.upsert', async chatUpdate => {
     try {
-        let mek = chatUpdate.messages[0];
-        if (!mek || !mek.key) return;
-        if (mek.key.remoteJid === 'status@broadcast') {
-            const statusViewEnabled = await getSetting("statusView", true); 
-
-            if (statusViewEnabled) {
-                await trashcore.readMessages([mek.key]);
-            }
-        }
+      let mek = chatUpdate.messages[0];
+      if (!mek || !mek.key) return;
+      if (mek.key.remoteJid === 'status@broadcast') {
+        const statusViewEnabled = await getSetting("statusView", true);
+        if (statusViewEnabled) await trashcore.readMessages([mek.key]);
+      }
     } catch (err) {
-        console.error("❌ Status view error:", err);
+      console.error("❌ Status view error:", err);
     }
-});
+  });
+
   // ===== CONNECTION MONITOR =====
   trashcore.ev.on('connection.update', async ({ connection, lastDisconnect }) => {
+
     if (connection === 'close') {
       const reason = lastDisconnect?.error?.output?.statusCode;
       if (reason !== DisconnectReason.loggedOut) {
-        console.log(chalk.yellow("🔄 Connection closed, reconnecting..."));
+        console.log(chalk.yellow("🔄 Reconnecting..."));
         setTimeout(() => startBot(phoneNumber), 1500);
       } else {
-        console.log(chalk.red("🚪 Logged out. Delete ./session to re-pair."));
+        console.log(chalk.red("🚪 Logged out. Delete ./session to pair again."));
       }
-    } else if (connection === 'open') {
+    }
+
+    else if (connection === 'open') {
       const botNumber = normalizeNumber(trashcore.user.id);
-      console.log(chalk.greenBright(`✅ Bot connected as ${botNumber}`));
+      console.log(chalk.greenBright(`\n✅ Bot connected as: ${botNumber}\n`));
 
       await initDatabase();
-      console.log(chalk.greenBright("✅ Connected to SQLite database..."));
+      console.log(chalk.green("📁 Database connected!"));
 
-      const cleanedCache = cleanOldCache();
-      const cleanedMessages = cleanupOldMessages(24);
-      console.log(chalk.blueBright(`🧹 Cleaned ${cleanedCache} cache files, ${cleanedMessages} older messages`));
+      console.log(chalk.blue(`🧹 Cache cleaned: ${cleanOldCache()} files, ${cleanupOldMessages()} old messages`));
 
-      console.log(chalk.greenBright("🚀 Ultra Bot is fully ready!"));
+      const prefix = await getSetting("prefix") || ".";
+
+      // 📌 REAL PLUGIN COUNT
+      const pluginCount = plugins.size;
+
+      const statusMsg = `
+💠 *ULTRA X BETA ACTIVATED!*
+
+ *Bot Name:* Ultra X
+> ❐ *Version:* 5.0.0
+> ❐ *Prefix:* ${prefix}
+> ❐ *Plugins:* ${pluginCount}
+
+> ❐ Connected as: wa.me/${botNumber}
+✓ Uptime running...
+`;
+
+      await trashcore.sendMessage(`${botNumber}@s.whatsapp.net`, { text: statusMsg });
     }
   });
 
   // ===== MESSAGE LISTENER =====
   trashcore.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
-
     const m = messages?.[0];
     if (!m || !m.message) return;
 
-    // Handle ephemeral messages
     if (m.message?.ephemeralMessage) m.message = m.message.ephemeralMessage.message;
 
-    // ===== LOG MESSAGES =====
     await logMessage(m, trashcore);
 
-    // ===== HANDLE COMMAND =====
     const handleMessage = getHandleMessage();
     await handleMessage(trashcore, m);
   });
+
 }
 
-// ================== STARTUP ==================
+// ===== STARTUP SYSTEM =====
 async function main() {
   const sessionDir = path.join(__dirname, 'session');
   const sessionFile = path.join(sessionDir, 'creds.json');
 
   if (fs.existsSync(sessionFile)) {
-    console.log(chalk.greenBright("✅ Existing session found. Starting bot without pairing..."));
+    console.log(chalk.greenBright("🔑 Session found — starting bot..."));
     await startBot();
   } else {
-    console.log(chalk.yellowBright("⚠️ No session found! You need to pair your WhatsApp number."));
+    console.log(chalk.yellowBright("🔐 No session found — pairing required!"));
     await startBot();
   }
 }
