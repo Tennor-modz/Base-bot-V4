@@ -1,7 +1,7 @@
 const { getSetting, setSetting } = require("../../database");
 
 module.exports = {
-  command: ["statusview", "status"],
+  command: ["statusview", "statusvw"],
   desc: "Toggle automatic status viewing (owner only)",
   category: "Owner",
   run: async ({ m, args, xreply, isOwner }) => {
