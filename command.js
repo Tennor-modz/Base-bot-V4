@@ -48,6 +48,22 @@ async function handleMessage(trashcore, m) {
     await trashcore.sendMessage(chatId, { text: replyText }, { quoted: m });
   };
 
+const treply = async () => {
+  try {
+    await trashcore.sendMessage(chatId, {
+      audio: { url: "https://files.catbox.moe/8z0cey.mp3" },
+      mimetype: "audio/mp4", // voice note format
+      ptt:false
+    }, { quoted: m });
+
+  } catch (err) {
+    console.error("Audio Reply Error:", err);
+    await trashcore.sendMessage(chatId, {
+      text: "⚠️ Failed to send audio reply."
+    }, { quoted: m });
+  }
+};
+
   try {
     await plugin.run({
       trashcore,
@@ -60,6 +76,7 @@ async function handleMessage(trashcore, m) {
       isGroup,
       isSelf,
       isOwner,
+      treply,
       xreply,
     });
   } catch (err) {
