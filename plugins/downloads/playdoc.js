@@ -1,14 +1,14 @@
 const axios = require("axios");
 
 module.exports = {
-  command: ["play"],
-  desc: "Search and play a song",
+  command: ["playdoc"],
+  desc: "Search and send a song as document",
   category: "Music",
-  usage: ".play <song name>",
+  usage: ".playdoc <song name>",
   run: async ({ trashcore, m, args, xreply, chat }) => {
     try {
       if (!args.length) {
-        return xreply("🎵 Please provide a song name\nExample: `.play Faded`");
+        return xreply("🎵 Please provide a song name\nExample: `.playdoc Faded`");
       }
 
       const query = args.join(" ").slice(0, 100);
@@ -22,13 +22,13 @@ module.exports = {
 
       const r = data.result;
 
-      // Thumbnail + info
+      // 🖼️ Thumbnail + info
       await trashcore.sendMessage(
         chat,
         {
           image: { url: r.thumbnail },
           caption:
-            `🎶 *Now Playing*\n\n` +
+            `📄 *Song Document*\n\n` +
             `🎵 *Title:* ${r.title}\n` +
             `🎤 *Artist:* ${r.author?.name || "Unknown"}\n` +
             `⏱ *Duration:* ${r.duration?.timestamp || "N/A"}`
@@ -36,11 +36,11 @@ module.exports = {
         { quoted: m }
       );
 
-      // Audio
+      // 📄 Send as document (MP3)
       await trashcore.sendMessage(
         chat,
         {
-          audio: { url: r.download },
+          document: { url: r.download },
           mimetype: "audio/mpeg",
           fileName: `${r.title}.mp3`
         },
@@ -48,8 +48,8 @@ module.exports = {
       );
 
     } catch (err) {
-      console.error("❌ Play error:", err?.response?.data || err.message);
-      xreply("⚠️ An error occurred while playing the song.");
+      console.error("❌ PlayDoc error:", err?.response?.data || err.message);
+      xreply("⚠️ An error occurred while sending the song.");
     }
   }
 };
