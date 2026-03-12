@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const chalk = require("chalk");
+const chokidar = require("chokidar");
 
 const plugins = new Map();
 
@@ -45,25 +46,45 @@ function loadPlugin(relativePath) {
 function loadPlugins() {
   plugins.clear();
   const dir = path.join(__dirname, "plugins");
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   walkPlugins(dir);
   console.log(chalk.cyanBright(`🔌 Commands loaded: ${plugins.size}`));
 }
 
 function watchPlugins() {
   const dir = path.join(__dirname, "plugins");
-  fs.watch(dir, { recursive: true }, (_, filename) => {
-    if (!filename || !filename.endsWith(".js")) return;
-    const file = filename.replace(/\\/g, "/");
-    console.log(chalk.yellow(`🔄 Plugin change: ${file}`));
+
+  chokidar.watch(dir, {
+    persistent: true,
+    ignoreInitial: true,        // don't fire for files already loaded
+    awaitWriteFinish: {
+      stabilityThreshold: 300,  // wait 300ms after last write before triggering
+      pollInterval: 100
+    }
+  }).on("add", filePath => {
+    const rel = path.relative(dir, filePath).replace(/\\/g, "/");
+    if (!rel.endsWith(".js")) return;
+    console.log(chalk.yellow(`🔄 Plugin added: ${rel}`));
+    loadPlugin(rel);
+
+  }).on("change", filePath => {
+    const rel = path.relative(dir, filePath).replace(/\\/g, "/");
+    if (!rel.endsWith(".js")) return;
+    console.log(chalk.yellow(`🔄 Plugin changed: ${rel}`));
 
     for (const [cmd, data] of plugins.entries()) {
-      if (data.__file === file) plugins.delete(cmd);
+      if (data.__file === rel) plugins.delete(cmd);
     }
+    loadPlugin(rel);
 
-    const full = path.join(dir, file);
-    if (fs.existsSync(full)) loadPlugin(file);
-    else console.log(chalk.red(`🗑 Removed: ${file}`));
+  }).on("unlink", filePath => {
+    const rel = path.relative(dir, filePath).replace(/\\/g, "/");
+    if (!rel.endsWith(".js")) return;
+    console.log(chalk.red(`🗑 Plugin removed: ${rel}`));
+
+    for (const [cmd, data] of plugins.entries()) {
+      if (data.__file === rel) plugins.delete(cmd);
+    }
   });
 }
 
