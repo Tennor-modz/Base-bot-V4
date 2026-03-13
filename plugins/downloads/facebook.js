@@ -2,10 +2,11 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 
 module.exports = {
+  File: __filename, // ✅ Required for Linux self-hosted
   command: ["fb", "facebook", "instagram", "igdl"],
   desc: "Download Facebook or Instagram media",
   category: "Utility",
-  run: async ({ trashcore, m, args, text, xreply,chat }) => {
+  run: async ({ trashcore, m, args, text, xreply, chat }) => {
     try {
       if (!args[0]) {
         const cmd = text.split(" ")[0] || ".fb";
@@ -13,8 +14,9 @@ module.exports = {
       }
 
       const url = args[0];
-      const progressMsg = await xreply("⏳ Fetching media... Please wait!");
+      await xreply("⏳ Fetching media... Please wait!");
 
+      // Main media fetch function
       async function fetchMedia(url) {
         try {
           const form = new URLSearchParams();
@@ -29,10 +31,11 @@ module.exports = {
             },
           });
 
-          if (data.status !== "ok") throw new Error("Provide a valid link.");
-          const $ = cheerio.load(data.data);
+          if (!data || data.status !== "ok") throw new Error("Provide a valid link.");
+          const $ = cheerio.load(data.data || '');
 
-          if (/^(https?:\/\/)?(www\.)?(facebook\.com|fb\.watch)\/.+/i.test(url)) {
+          // Facebook
+          if (/facebook\.com|fb\.watch/i.test(url)) {
             const thumb = $('img').attr("src");
             let links = [];
             $('table tbody tr').each((_, el) => {
@@ -40,23 +43,28 @@ module.exports = {
               const link = $(el).find('a.download-link-fb').attr("href");
               if (quality && link) links.push({ quality, link });
             });
-            if (links.length > 0) return { platform: "Facebook", type: "video", thumb, media: links[0].link };
+
+            if (links.length > 0) return { platform: "Facebook", type: "video", media: links[0].link };
             if (thumb) return { platform: "Facebook", type: "image", media: thumb };
-            throw new Error("Media is invalid.");
+
+            throw new Error("Facebook media is invalid.");
           }
 
           // Instagram
-          if (/^(https?:\/\/)?(www\.)?(instagram\.com\/(p|reel)\/).+/i.test(url)) {
+          if (/instagram\.com\/(p|reel)\//i.test(url)) {
             const video = $('a[title="Download Video"]').attr("href");
             const image = $('img').attr("src");
+
             if (video) return { platform: "Instagram", type: "video", media: video };
             if (image) return { platform: "Instagram", type: "image", media: image };
-            throw new Error("Media is invalid.");
+
+            throw new Error("Instagram media is invalid.");
           }
 
-          throw new Error("Provide a valid Facebook or Instagram URL.");
+          throw new Error("URL must be Facebook or Instagram link.");
+
         } catch (err) {
-          return { error: err.message };
+          return { error: err.message || "Failed to fetch media." };
         }
       }
 
@@ -64,14 +72,13 @@ module.exports = {
 
       if (res.error) return xreply(`⚠️ Error: ${res.error}`);
 
-      await xreply("⏳ Media found! Downloading...");
-
+      // Send media
       if (res.type === "video") {
         await trashcore.sendMessage(chat, {
           video: { url: res.media },
           caption: `✅ Downloaded video from ${res.platform}!`,
         }, { quoted: m });
-      } else if (res.type === "image") {
+      } else {
         await trashcore.sendMessage(chat, {
           image: { url: res.media },
           caption: `✅ Downloaded photo from ${res.platform}!`,
